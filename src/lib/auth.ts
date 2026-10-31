@@ -33,7 +33,10 @@ export async function requireAdmin() {
   } catch {
     throw new HttpError(401, "Please sign in again.");
   }
-  const live = await adminDb().rpc("is_live_session", { p_session: sessionId, p_user: user.id });
+  const live = await adminDb().rpc("nfc_is_live_session", {
+    p_session: sessionId,
+    p_user: user.id,
+  });
   if (live.error) throw new HttpError(503, "Unable to verify your session. Please try again.");
   if (!live.data) throw new HttpError(401, "Your session has ended. Please sign in again.");
   return user;

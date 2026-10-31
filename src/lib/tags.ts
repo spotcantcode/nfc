@@ -14,7 +14,7 @@ export async function listTags(
 ) {
   const db = adminDb();
   const allowed = ["created_at", "name", "scan_count", "last_scanned_at", "updated_at"];
-  let query = db.from("tags").select("*", { count: "exact" });
+  let query = db.from("nfc").select("*", { count: "exact" });
   if (search) query = query.ilike("name", `%${search.replace(/[\\%_]/g, "\\$&")}%`);
   if (status === "active" || status === "disabled") query = query.eq("active", status === "active");
   const { data, count, error } = await query
@@ -28,14 +28,14 @@ export async function listTags(
   return { tags: data as Tag[], count: count ?? 0 };
 }
 export async function stats() {
-  const { data, error } = await adminDb().rpc("tag_stats");
+  const { data, error } = await adminDb().rpc("nfc_stats");
   if (error) throw error;
   return data as Stats;
 }
 export async function createTag(input: z.infer<typeof tagInput>) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { data, error } = await adminDb()
-      .from("tags")
+      .from("nfc")
       .insert({ ...input, id: generateId() })
       .select()
       .single();
@@ -46,7 +46,7 @@ export async function createTag(input: z.infer<typeof tagInput>) {
 }
 export async function updateTag(id: string, input: z.infer<typeof tagInput>) {
   const { data, error } = await adminDb()
-    .from("tags")
+    .from("nfc")
     .update(input)
     .eq("id", id)
     .select()
@@ -57,7 +57,7 @@ export async function updateTag(id: string, input: z.infer<typeof tagInput>) {
 }
 export async function deleteTag(id: string) {
   const { data, error } = await adminDb()
-    .from("tags")
+    .from("nfc")
     .delete()
     .eq("id", id)
     .select("id")
@@ -67,8 +67,8 @@ export async function deleteTag(id: string) {
 }
 export async function scanHistory(tagId?: string, page = 1) {
   let query = adminDb()
-    .from("scan_events")
-    .select("id,tag_id,scanned_at,tags(name)", { count: "exact" });
+    .from("nfc_scan_events")
+    .select("id,tag_id,scanned_at,tags:nfc(name)", { count: "exact" });
   if (tagId) query = query.eq("tag_id", tagId);
   const { data, count, error } = await query
     .order("scanned_at", { ascending: false })

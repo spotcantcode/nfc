@@ -155,7 +155,7 @@ describe("public redirect routes", () => {
     for (const header of ["cache-control", "cdn-cache-control", "vercel-cdn-cache-control"])
       expect(res.headers.get(header)).toContain("no-store");
     expect(mocks.auth).not.toHaveBeenCalled();
-    expect(mocks.rpc).toHaveBeenCalledWith("resolve_nfc", { p_id: id });
+    expect(mocks.rpc).toHaveBeenCalledWith("nfc_resolve", { p_id: id });
     expect(mocks.after).toHaveBeenCalledOnce();
   });
   it("shows the same private error page for disabled and missing tags", async () => {

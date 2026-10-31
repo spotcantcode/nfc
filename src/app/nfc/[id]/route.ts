@@ -21,7 +21,7 @@ async function resolve(context: { params: Promise<{ id: string }> }, log: boolea
   const parsed = publicId.safeParse((await context.params).id);
   if (!parsed.success) return unavailable();
   try {
-    const { data, error } = await redirectDb().rpc("resolve_nfc", { p_id: parsed.data });
+    const { data, error } = await redirectDb().rpc("nfc_resolve", { p_id: parsed.data });
     if (error) return unavailable(503);
     if (!data?.[0]?.destination_url) return unavailable();
     const destination = await publicDestination(data[0].destination_url);
@@ -29,7 +29,7 @@ async function resolve(context: { params: Promise<{ id: string }> }, log: boolea
     if (log)
       after(async () => {
         try {
-          await redirectDb().rpc("record_scan", { p_id: parsed.data });
+          await redirectDb().rpc("nfc_record_scan", { p_id: parsed.data });
         } catch {
           /* Analytics must never break the link. */
         }

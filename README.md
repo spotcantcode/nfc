@@ -13,36 +13,29 @@ Unset or unrecognized `APP_MODE` means redirects only. Management is **always di
 
 The app uses Next.js App Router, TypeScript, Tailwind, shadcn/ui, and Supabase PostgreSQL/Auth.
 
-## Existing deployment: switch safely
+## Database and deployment
 
-The public sticker origin is **https://nfc-gamma-nine.vercel.app**. Keep this hostname and the same database so existing stickers remain valid.
+Target: **cspotrn@gmail.com's Org → Coaches and Consultants**, project `buoueqgtrfbimncyrsss` ([table editor](https://supabase.com/dashboard/project/buoueqgtrfbimncyrsss/editor)). The main table is **`public.nfc`**. Supporting tables are `nfc_scan_events`, `nfc_reserved_ids`, and `nfc_rate_limits`; app RPCs are prefixed `nfc_`. Other applications' tables and functions are left unchanged.
 
-1. Apply the new `supabase/migrations/20261031164151_split_public_redirect_capabilities.sql` migration **before deploying this change**. For a fresh database, apply both migration files in filename order. They preserve existing tags, identifiers, destinations, and scans.
-2. Configure Vercel using only the values in `.env.public.example`:
+The public sticker origin is **https://nfc-gamma-nine.vercel.app**. Keep this hostname and the same database so stickers remain valid.
+
+1. The NFC schema is installed in the selected project, with migration `20261031165538` recorded. Source: `supabase/migrations/20261031165538_create_namespaced_nfc_tables.sql`. For another empty installation, apply only this file through the SQL editor or a targeted migration tool. Do not rerun it on the existing tables, reset the shared database, or reconcile its unrelated migration history with this NFC-only repository. The earlier, unapplied drafts with generic table names have been replaced.
+2. Configure Vercel using only `.env.public.example`:
 
    ```dotenv
    APP_MODE=redirects
    NEXT_PUBLIC_APP_URL=https://nfc-gamma-nine.vercel.app
-   SUPABASE_URL=<your Supabase project URL>
+   SUPABASE_URL=https://buoueqgtrfbimncyrsss.supabase.co
    SUPABASE_PUBLISHABLE_KEY=<your publishable key or legacy anon key>
    ```
 
-   Remove `SUPABASE_SECRET_KEY`, `SESSION_SECRET`, `ADMIN_EMAILS`, `ADMIN_APP_URL`, and the obsolete `CRON_SECRET` from Vercel. Do not copy `.env.local` to Vercel. A secret/service-role key in the publishable-key setting is rejected.
+   Remove `SUPABASE_SECRET_KEY`, `SESSION_SECRET`, `ADMIN_EMAILS`, `ADMIN_APP_URL`, and the obsolete `CRON_SECRET` from Vercel. Keep management credentials only in the local `.env.local`. A secret/service-role key in the publishable-key setting is rejected.
 
-3. Redeploy. Signed-out and signed-in requests to `/`, `/login`, `/auth/callback`, `/dashboard/*`, and `/api/*` should return 404. Known active `/nfc/[id]` links should still return 307 with `no-store` headers.
-4. Remove older deployments that still serve the hosted dashboard. If a management key was stored in an older deployment, rotate that key and update the local copy; removing an environment variable from new deployments does not remove it from old ones.
-5. Set up database-side retention below. The former Vercel cron route and schedule have been removed.
+3. Redeploy. Signed-out and signed-in requests to `/`, `/login`, `/auth/callback`, `/dashboard/*`, and `/api/*` should return 404. Known active `/nfc/[id]` links return 307 with `no-store` headers.
+4. Remove older deployments that still serve the hosted dashboard. If an older deployment contained a management key, rotate that key and update the local copy; removing a new deployment's environment variable does not remove it from old deployments.
+5. Set up database-side retention below; no Vercel cron or privileged cloud credential is needed.
 
-CLI migration alternative (Supabase CLI installed and authenticated):
-
-```sh
-supabase link --project-ref YOUR_PROJECT_REF
-supabase db push --dry-run
-supabase db push
-supabase db advisors --linked
-```
-
-Use a dedicated Supabase project. Keep `public` in the Data API's exposed schemas, and **do not expose `nfc_private`**. The migration enables only the two public lookup/scan wrappers for the anonymous role. RLS and revoked table privileges still prevent reading the tag table, private names/notes/history, and all tag mutations. Statistics, session lookup, rate limiting, and retention RPCs remain service-only. Anonymous callers who know a tag URL can resolve it and record scans; these operations are intentionally public.
+Keep `public` exposed in the Data API and **do not expose `nfc_private`**. Only the two public wrappers (`nfc_resolve` and `nfc_record_scan`) are enabled for anonymous callers. RLS and revoked table privileges prevent reading the `nfc` table, names/notes/history, and all tag mutations. Statistics, session lookup, rate limiting, and retention remain service-only. A person who knows a tag URL can resolve it and record scans; these capabilities are deliberately public. Existing project policies for other apps are unchanged.
 
 ## Run the dashboard on your Mac
 
@@ -60,7 +53,7 @@ Fill in `.env.local`:
 | `APP_MODE`                 | `local-admin` (also explicitly selected by the local start commands)               |
 | `ADMIN_APP_URL`            | `http://localhost:3000` — loopback origins only                                    |
 | `NEXT_PUBLIC_APP_URL`      | `https://nfc-gamma-nine.vercel.app` — the **public sticker origin**, not localhost |
-| `SUPABASE_URL`             | Same Supabase project as the public server                                         |
+| `SUPABASE_URL`             | `https://buoueqgtrfbimncyrsss.supabase.co`                                         |
 | `SUPABASE_PUBLISHABLE_KEY` | Same publishable key or legacy anon key                                            |
 | `SUPABASE_SECRET_KEY`      | Local-only secret key or legacy service_role key                                   |
 | `ADMIN_EMAILS`             | Comma-separated exact approved email addresses                                     |
@@ -89,7 +82,7 @@ Keep `.env.local` out of Git and cloud hosting. No Supabase project or credentia
 
 Email sign-in remains an extra safeguard for the local dashboard. No public signup is provided.
 
-1. In Supabase Authentication, enable email auth, **disable new-user signup**, and disable anonymous sign-ins and unused providers. Checked-in `supabase/config.toml` settings apply only to Docker-backed local Supabase; change hosted settings in the dashboard.
+1. This is a shared Supabase project: **do not change project-wide signup/provider/SMTP settings for NFC without checking the other apps**. NFC never creates accounts during login and checks its local `ADMIN_EMAILS` on every management operation. The deny policies on NFC tables also reject other apps’ authenticated users. Checked-in `supabase/config.toml` settings apply only to an isolated Docker-backed development project.
 2. Add your email to local `ADMIN_EMAILS`, then provision it once:
 
    ```sh
@@ -98,7 +91,7 @@ Email sign-in remains an extra safeguard for the local dashboard. No public sign
 
    This reads `.env.local`, creates a confirmed owner, and sends no email. Alternatively use Supabase's admin UI to create a confirmed user. Login uses `shouldCreateUser: false`.
 
-3. Set Supabase Auth Site URL to `http://localhost:3000`. Allow the exact callback **`http://localhost:3000/auth/callback`**. Remove the old Vercel callback from the allowlist. Use your chosen local port consistently.
+3. Add the exact callback **`http://localhost:3000/auth/callback`** to Supabase Auth’s redirect allowlist, preserving other apps’ URLs and the existing Site URL. NFC passes this local callback explicitly. Use your chosen local port consistently.
 4. Keep the Magic Link email template linked to `{{ .ConfirmationURL }}`:
 
    ```html
@@ -107,14 +100,14 @@ Email sign-in remains an extra safeguard for the local dashboard. No public sign
 
    The server uses PKCE and exchanges the one-use code at the local callback. Open the link in the **same browser on your Mac** that requested it. Opening it on your phone will not work. Expired/used links, a different browser, or email link scanners may require a fresh link.
 
-5. Configure custom SMTP in Supabase for real delivery: host, port, username/password, verified sender. Disable email click tracking/link rewriting. Supabase's default sender has recipient restrictions and low limits. SMTP secrets belong in Supabase. Login responses deliberately do not reveal whether an email is allowed/provisioned; use Supabase delivery logs to troubleshoot.
-6. Set JWT lifetime to 15 minutes. The app additionally enforces an absolute 12-hour session, checks the live Auth session on every management request, and revokes the current session on logout.
+5. Reuse the project’s existing email provider/SMTP configuration. If delivery is unavailable, assess changes with the other apps before changing shared SMTP settings. The default sender has recipient restrictions and low limits. Login responses do not reveal whether an email is allowed/provisioned; use Supabase delivery logs to troubleshoot.
+6. NFC enforces an absolute 12-hour session, checks the live Auth session on every management request, and revokes only its current session on logout. Preserve the shared project’s existing JWT/session configuration.
 
 ## Retention while your Mac is off
 
-Enable **Supabase Cron** in the Supabase dashboard, then run `supabase/retention.sql` in its SQL editor as the project owner. It schedules `public.prune_history()` daily at 03:00 UTC. The named schedule is updated if run again. Check the job's run history in Supabase.
+The selected project already has an active **Supabase Cron** job named `nfc-retention`, running `public.nfc_prune_history()` daily at 03:00 UTC. Check its run history in Supabase. For a separate installation, enable Supabase Cron and run `supabase/retention.sql` as the project owner; running that script again updates the named schedule.
 
-The function removes event details older than 90 days and expired rate-limit buckets. Lifetime scan counters and reserved identifiers remain. This runs in the database with no public HTTP cleanup endpoint or management key on Vercel. If Cron is not enabled, cleanup is not automatic; run `select public.prune_history();` manually until scheduled.
+The function removes event details older than 90 days and expired rate-limit buckets. Lifetime scan counters and reserved identifiers remain. This runs in the database with no public HTTP cleanup endpoint or management key on Vercel. If Cron is not enabled, cleanup is not automatic; run `select public.nfc_prune_history();` manually until scheduled.
 
 ## Write and use a sticker
 

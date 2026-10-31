@@ -17,7 +17,7 @@ const migration = (
 ).join("\n");
 const insert = (id: string, name = "Studio") =>
   db.query(
-    "insert into public.tags(id,name,destination_url) values ($1,$2,'https://example.com') returning *",
+    "insert into public.nfc(id,name,destination_url) values ($1,$2,'https://example.com') returning *",
     [id, name],
   );
 beforeAll(async () => {
@@ -26,6 +26,9 @@ beforeAll(async () => {
   await db.exec(
     "create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create table auth.sessions(id uuid primary key,user_id uuid,not_after timestamptz);",
   );
+  await db.exec(
+    "create table public.tags(id integer primary key, note text); insert into public.tags values (1,'Existing app'); create function public.consume_rate_limit(text,integer,integer) returns text language sql as $$select 'Existing function'::text$$;",
+  );
   await db.exec(migration);
 }, 30000);
 afterAll(async () => {
@@ -33,57 +36,67 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 describe("actual PostgreSQL migration and persistence", () => {
-  it("anon can resolve and scan one active ID but cannot read private metadata or manage tags", async () => {
+  it("leaves other applications' tables and functions unchanged", async () => {
+    expect((await db.query("select * from public.tags")).rows).toEqual([
+      { id: 1, note: "Existing app" },
+    ]);
+    expect(
+      (await db.query("select public.consume_rate_limit('existing',1,1) as result")).rows,
+    ).toEqual([{ result: "Existing function" }]);
+  });
+  it("anon can resolve and scan one active ID but cannot read private metadata or manage nfc", async () => {
     const id = generateId();
     await insert(id, "Private name");
     try {
       await db.exec("set role anon");
-      expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([
+      expect((await db.query("select * from public.nfc_resolve($1)", [id])).rows).toEqual([
         { destination_url: "https://example.com" },
       ]);
       expect(
-        (await db.query("select * from public.resolve_nfc($1)", ["%' or true --"])).rows,
+        (await db.query("select * from public.nfc_resolve($1)", ["%' or true --"])).rows,
       ).toEqual([]);
-      await db.query("select public.record_scan($1)", [id]);
-      await expect(db.query("select name, description from tags")).rejects.toThrow(
+      await db.query("select public.nfc_record_scan($1)", [id]);
+      await expect(db.query("select name, description from nfc")).rejects.toThrow(
         /permission denied/,
       );
       await expect(
-        db.query("update tags set destination_url='https://evil.com' where id=$1", [id]),
+        db.query("update nfc set destination_url='https://evil.com' where id=$1", [id]),
       ).rejects.toThrow(/permission denied/);
       await expect(insert(generateId())).rejects.toThrow(/permission denied/);
-      await expect(db.query("select public.tag_stats()")).rejects.toThrow(/permission denied/);
-      await expect(db.query("select public.prune_history()")).rejects.toThrow(/permission denied/);
+      await expect(db.query("select public.nfc_stats()")).rejects.toThrow(/permission denied/);
+      await expect(db.query("select public.nfc_prune_history()")).rejects.toThrow(
+        /permission denied/,
+      );
     } finally {
       await db.exec("reset role");
     }
     const result = await db.query<{ scan_count: number; name: string; destination_url: string }>(
-      "select * from tags where id=$1",
+      "select * from nfc where id=$1",
       [id],
     );
     expect(Number(result.rows[0].scan_count)).toBe(1);
     expect(result.rows[0].name).toBe("Private name");
     expect(result.rows[0].destination_url).toBe("https://example.com");
-    await db.query("update tags set active=false where id=$1", [id]);
+    await db.query("update nfc set active=false where id=$1", [id]);
     try {
       await db.exec("set role anon");
-      expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([]);
-      await db.query("select public.record_scan($1)", [id]);
+      expect((await db.query("select * from public.nfc_resolve($1)", [id])).rows).toEqual([]);
+      await db.query("select public.nfc_record_scan($1)", [id]);
     } finally {
       await db.exec("reset role");
     }
     expect(
       Number(
-        (await db.query<{ scan_count: number }>("select scan_count from tags where id=$1", [id]))
+        (await db.query<{ scan_count: number }>("select scan_count from nfc where id=$1", [id]))
           .rows[0].scan_count,
       ),
     ).toBe(1);
   });
-  it("creates and edits tags without changing their permanent ID", async () => {
+  it("creates and edits nfc without changing their permanent ID", async () => {
     const id = generateId();
     await insert(id);
     await db.query(
-      "update public.tags set name='Renamed',destination_url='https://wikipedia.org',active=false where id=$1",
+      "update public.nfc set name='Renamed',destination_url='https://wikipedia.org',active=false where id=$1",
       [id],
     );
     const { rows } = await db.query<{
@@ -91,7 +104,7 @@ describe("actual PostgreSQL migration and persistence", () => {
       name: string;
       active: boolean;
       destination_url: string;
-    }>("select * from public.tags where id=$1", [id]);
+    }>("select * from public.nfc where id=$1", [id]);
     expect(rows[0]).toMatchObject({
       id,
       name: "Renamed",
@@ -99,53 +112,53 @@ describe("actual PostgreSQL migration and persistence", () => {
       destination_url: "https://wikipedia.org",
     });
     await expect(
-      db.query("update public.tags set id=$1 where id=$2", [generateId(), id]),
+      db.query("update public.nfc set id=$1 where id=$2", [generateId(), id]),
     ).rejects.toThrow(/immutable/);
   });
-  it("reserves IDs forever, even after deleting tags", async () => {
+  it("reserves IDs forever, even after deleting nfc", async () => {
     const id = generateId();
     await insert(id);
-    await db.query("delete from public.tags where id=$1", [id]);
+    await db.query("delete from public.nfc where id=$1", [id]);
     await expect(insert(id)).rejects.toThrow(/duplicate key/);
-    const reserved = await db.query("select id from public.reserved_tag_ids where id=$1", [id]);
+    const reserved = await db.query("select id from public.nfc_reserved_ids where id=$1", [id]);
     expect(reserved.rows).toHaveLength(1);
   });
-  it("resolves active tags with only the destination column", async () => {
+  it("resolves active nfc with only the destination column", async () => {
     const id = generateId();
     await insert(id);
-    const result = await db.query("select * from public.resolve_nfc($1)", [id]);
+    const result = await db.query("select * from public.nfc_resolve($1)", [id]);
     expect(result.rows).toEqual([{ destination_url: "https://example.com" }]);
-    await db.query("update public.tags set active=false where id=$1", [id]);
-    expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([]);
-    expect((await db.query("select * from public.resolve_nfc($1)", [generateId()])).rows).toEqual(
+    await db.query("update public.nfc set active=false where id=$1", [id]);
+    expect((await db.query("select * from public.nfc_resolve($1)", [id])).rows).toEqual([]);
+    expect((await db.query("select * from public.nfc_resolve($1)", [generateId()])).rows).toEqual(
       [],
     );
   });
   it("atomically records scans while retaining configuration modification date", async () => {
     const id = generateId();
     await insert(id);
-    const before = await db.query<{ updated_at: Date }>("select updated_at from tags where id=$1", [
+    const before = await db.query<{ updated_at: Date }>("select updated_at from nfc where id=$1", [
       id,
     ]);
     await Promise.all(
-      Array.from({ length: 10 }, () => db.query("select public.record_scan($1)", [id])),
+      Array.from({ length: 10 }, () => db.query("select public.nfc_record_scan($1)", [id])),
     );
     const { rows } = await db.query<{
       scan_count: number;
       last_scanned_at: Date;
       updated_at: Date;
-    }>("select * from tags where id=$1", [id]);
+    }>("select * from nfc where id=$1", [id]);
     expect(Number(rows[0].scan_count)).toBe(10);
     expect(rows[0].last_scanned_at).toBeTruthy();
     expect(rows[0].updated_at).toEqual(before.rows[0].updated_at);
-    expect((await db.query("select * from scan_events where tag_id=$1", [id])).rows).toHaveLength(
-      10,
-    );
-    await db.query("update tags set active=false where id=$1", [id]);
-    await db.query("select public.record_scan($1)", [id]);
+    expect(
+      (await db.query("select * from nfc_scan_events where tag_id=$1", [id])).rows,
+    ).toHaveLength(10);
+    await db.query("update nfc set active=false where id=$1", [id]);
+    await db.query("select public.nfc_record_scan($1)", [id]);
     expect(
       Number(
-        (await db.query<{ scan_count: number }>("select scan_count from tags where id=$1", [id]))
+        (await db.query<{ scan_count: number }>("select scan_count from nfc where id=$1", [id]))
           .rows[0].scan_count,
       ),
     ).toBe(10);
@@ -154,7 +167,7 @@ describe("actual PostgreSQL migration and persistence", () => {
     const key = generateId();
     const results = await Promise.all(
       Array.from({ length: 7 }, () =>
-        db.query<{ ok: boolean }>("select public.consume_rate_limit($1,3,3600) as ok", [key]),
+        db.query<{ ok: boolean }>("select public.nfc_consume_rate_limit($1,3,3600) as ok", [key]),
       ),
     );
     expect(results.map((r) => r.rows[0].ok)).toEqual([
@@ -170,56 +183,56 @@ describe("actual PostgreSQL migration and persistence", () => {
   it("denies anon and authenticated roles both tables and privileged functions", async () => {
     for (const role of ["anon", "authenticated"]) {
       await db.exec(`set role ${role}`);
-      for (const table of ["tags", "scan_events", "reserved_tag_ids", "rate_limits"]) {
+      for (const table of ["nfc", "nfc_scan_events", "nfc_reserved_ids", "nfc_rate_limits"]) {
         await expect(db.query(`select * from public.${table}`)).rejects.toThrow(
           /permission denied/,
         );
         await expect(db.query(`delete from public.${table}`)).rejects.toThrow(/permission denied/);
       }
       if (role === "authenticated")
-        await expect(db.query("select * from public.resolve_nfc('x')")).rejects.toThrow(
+        await expect(db.query("select * from public.nfc_resolve('x')")).rejects.toThrow(
           /permission denied/,
         );
-      else expect((await db.query("select * from public.resolve_nfc('x')")).rows).toEqual([]);
-      await expect(db.query("select public.consume_rate_limit('x',10,60)")).rejects.toThrow(
+      else expect((await db.query("select * from public.nfc_resolve('x')")).rows).toEqual([]);
+      await expect(db.query("select public.nfc_consume_rate_limit('x',10,60)")).rejects.toThrow(
         /permission denied/,
       );
-      await expect(db.query("select public.is_live_session(null,null)")).rejects.toThrow(
+      await expect(db.query("select public.nfc_is_live_session(null,null)")).rejects.toThrow(
         /permission denied/,
       );
       await db.exec("reset role");
     }
     const rls = await db.query<{ relrowsecurity: boolean }>(
-      "select relrowsecurity from pg_class where relname in ('tags','scan_events','reserved_tag_ids','rate_limits')",
+      "select relrowsecurity from pg_class where relname in ('nfc','nfc_scan_events','nfc_reserved_ids','nfc_rate_limits')",
     );
     expect(rls.rows).toHaveLength(4);
     expect(rls.rows.every((r) => r.relrowsecurity)).toBe(true);
   });
   it("RLS still denies reads and writes if a browser role accidentally receives table grants", async () => {
     await db.exec(
-      "grant select, insert, update, delete on public.tags to anon, authenticated; grant insert on public.reserved_tag_ids to anon, authenticated",
+      "grant select, insert, update, delete on public.nfc to anon, authenticated; grant insert on public.nfc_reserved_ids to anon, authenticated",
     );
     try {
       for (const role of ["anon", "authenticated"]) {
         await db.exec(`set role ${role}`);
-        expect((await db.query("select * from public.tags")).rows).toEqual([]);
+        expect((await db.query("select * from public.nfc")).rows).toEqual([]);
         await expect(insert(generateId())).rejects.toThrow(/row-level security/);
-        expect((await db.query("delete from public.tags returning id")).rows).toEqual([]);
+        expect((await db.query("delete from public.nfc returning id")).rows).toEqual([]);
         await db.exec("reset role");
       }
     } finally {
       await db.exec(
-        "reset role; revoke all on public.tags, public.reserved_tag_ids from anon, authenticated",
+        "reset role; revoke all on public.nfc, public.nfc_reserved_ids from anon, authenticated",
       );
     }
   });
-  it("service role can create and delete tags but cannot remove reservations", async () => {
+  it("service role can create and delete nfc but cannot remove reservations", async () => {
     await db.exec("set role service_role");
     const id = generateId();
     await insert(id);
-    await db.query("select public.record_scan($1)", [id]);
-    await db.query("delete from tags where id=$1", [id]);
-    await expect(db.query("delete from reserved_tag_ids where id=$1", [id])).rejects.toThrow(
+    await db.query("select public.nfc_record_scan($1)", [id]);
+    await db.query("delete from nfc where id=$1", [id]);
+    await expect(db.query("delete from nfc_reserved_ids where id=$1", [id])).rejects.toThrow(
       /permission denied/,
     );
     await db.exec("reset role");
@@ -227,17 +240,18 @@ describe("actual PostgreSQL migration and persistence", () => {
   it("removes 90-day events while preserving lifetime counters and retired IDs", async () => {
     const id = generateId();
     await insert(id);
-    await db.query("select public.record_scan($1)", [id]);
-    await db.query("update scan_events set scanned_at=now()-interval '91 days' where tag_id=$1", [
-      id,
-    ]);
-    await db.exec("select public.prune_history()");
-    expect((await db.query("select * from scan_events where tag_id=$1", [id])).rows).toHaveLength(
-      0,
+    await db.query("select public.nfc_record_scan($1)", [id]);
+    await db.query(
+      "update nfc_scan_events set scanned_at=now()-interval '91 days' where tag_id=$1",
+      [id],
     );
+    await db.exec("select public.nfc_prune_history()");
+    expect(
+      (await db.query("select * from nfc_scan_events where tag_id=$1", [id])).rows,
+    ).toHaveLength(0);
     expect(
       Number(
-        (await db.query<{ scan_count: number }>("select scan_count from tags where id=$1", [id]))
+        (await db.query<{ scan_count: number }>("select scan_count from nfc where id=$1", [id]))
           .rows[0].scan_count,
       ),
     ).toBe(1);
@@ -248,7 +262,7 @@ describe("actual PostgreSQL migration and persistence", () => {
     await db.query("insert into auth.sessions(id,user_id) values ($1,$2)", [session, user]);
     expect(
       (
-        await db.query<{ ok: boolean }>("select public.is_live_session($1,$2) as ok", [
+        await db.query<{ ok: boolean }>("select public.nfc_is_live_session($1,$2) as ok", [
           session,
           user,
         ])
@@ -257,7 +271,7 @@ describe("actual PostgreSQL migration and persistence", () => {
     await db.query("delete from auth.sessions where id=$1", [session]);
     expect(
       (
-        await db.query<{ ok: boolean }>("select public.is_live_session($1,$2) as ok", [
+        await db.query<{ ok: boolean }>("select public.nfc_is_live_session($1,$2) as ok", [
           session,
           user,
         ])
@@ -267,13 +281,13 @@ describe("actual PostgreSQL migration and persistence", () => {
   it("keeps tag destinations and reservations across application/database restart", async () => {
     const id = generateId();
     await insert(id, "Persistent");
-    await db.query("update tags set destination_url='https://wikipedia.org' where id=$1", [id]);
+    await db.query("update nfc set destination_url='https://wikipedia.org' where id=$1", [id]);
     await db.close();
     db = new PGlite(dir);
-    expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([
+    expect((await db.query("select * from public.nfc_resolve($1)", [id])).rows).toEqual([
       { destination_url: "https://wikipedia.org" },
     ]);
-    expect((await db.query("select id from reserved_tag_ids where id=$1", [id])).rows).toHaveLength(
+    expect((await db.query("select id from nfc_reserved_ids where id=$1", [id])).rows).toHaveLength(
       1,
     );
   });

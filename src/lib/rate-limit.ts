@@ -7,7 +7,7 @@ export function privateKey(value: string) {
   return createHmac("sha256", config().SESSION_SECRET).update(value).digest("hex");
 }
 export async function rateLimit(key: string, limit: number, seconds: number) {
-  const { data, error } = await adminDb().rpc("consume_rate_limit", {
+  const { data, error } = await adminDb().rpc("nfc_consume_rate_limit", {
     p_key: key,
     p_limit: limit,
     p_seconds: seconds,

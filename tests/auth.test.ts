@@ -62,7 +62,7 @@ describe("server dashboard authorization", () => {
   });
   it("allows an owner only with a live Auth session", async () => {
     expect(await requireAdmin()).toMatchObject({ id: "owner" });
-    expect(mocks.rpc).toHaveBeenCalledWith("is_live_session", {
+    expect(mocks.rpc).toHaveBeenCalledWith("nfc_is_live_session", {
       p_session: "session-uuid",
       p_user: "owner",
     });

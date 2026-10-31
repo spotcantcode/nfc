@@ -77,17 +77,17 @@ const server = createServer(async (req, res) => {
     }
     const rpc = url.pathname.match(/^\/rest\/v1\/rpc\/(\w+)$/)?.[1];
     const functions: Record<string, string[]> = {
-      resolve_nfc: ["p_id"],
-      record_scan: ["p_id"],
-      tag_stats: [],
-      consume_rate_limit: ["p_key", "p_limit", "p_seconds"],
-      is_live_session: ["p_session", "p_user"],
-      prune_history: [],
+      nfc_resolve: ["p_id"],
+      nfc_record_scan: ["p_id"],
+      nfc_stats: [],
+      nfc_consume_rate_limit: ["p_key", "p_limit", "p_seconds"],
+      nfc_is_live_session: ["p_session", "p_user"],
+      nfc_prune_history: [],
     };
     const isPublic = req.headers.apikey === "fixture-publishable";
     if (
       req.headers.apikey !== "fixture-secret" &&
-      !(isPublic && rpc && ["resolve_nfc", "record_scan"].includes(rpc))
+      !(isPublic && rpc && ["nfc_resolve", "nfc_record_scan"].includes(rpc))
     )
       return send({ message: "Forbidden" }, 403);
     if (rpc && functions[rpc]) {
@@ -100,31 +100,31 @@ const server = createServer(async (req, res) => {
         );
       });
       return send(
-        rpc === "resolve_nfc"
+        rpc === "nfc_resolve"
           ? result.rows
           : ((result.rows[0] as Record<string, unknown>)?.[rpc] ?? null),
       );
     }
     const table = url.pathname.replace("/rest/v1/", "");
-    if (!["tags", "scan_events"].includes(table)) return send({ message: "Not found" }, 404);
+    if (!["nfc", "nfc_scan_events"].includes(table)) return send({ message: "Not found" }, 404);
     const id = url.searchParams.get("id")?.replace(/^eq\./, "");
     let result;
-    if (req.method === "POST" && table === "tags") {
+    if (req.method === "POST" && table === "nfc") {
       result = await db.query(
-        "insert into tags(id,name,destination_url,description,active) values ($1,$2,$3,$4,$5) returning *",
+        "insert into nfc(id,name,destination_url,description,active) values ($1,$2,$3,$4,$5) returning *",
         [payload.id, payload.name, payload.destination_url, payload.description, payload.active],
       );
-    } else if (req.method === "PATCH" && table === "tags") {
+    } else if (req.method === "PATCH" && table === "nfc") {
       result = await db.query(
-        "update tags set name=$1,destination_url=$2,description=$3,active=$4 where id=$5 returning *",
+        "update nfc set name=$1,destination_url=$2,description=$3,active=$4 where id=$5 returning *",
         [payload.name, payload.destination_url, payload.description, payload.active, id],
       );
-    } else if (req.method === "DELETE" && table === "tags") {
-      result = await db.query("delete from tags where id=$1 returning id", [id]);
+    } else if (req.method === "DELETE" && table === "nfc") {
+      result = await db.query("delete from nfc where id=$1 returning id", [id]);
     } else {
       const values: unknown[] = [];
       const where: string[] = [];
-      for (const key of table === "tags" ? ["name", "active", "id"] : ["tag_id"]) {
+      for (const key of table === "nfc" ? ["name", "active", "id"] : ["tag_id"]) {
         const filter = url.searchParams.get(key);
         if (!filter) continue;
         const operator = filter.startsWith("ilike.") ? "ilike" : "=";
@@ -157,8 +157,8 @@ const server = createServer(async (req, res) => {
         .join(",");
       const limit = Math.min(100, Number(url.searchParams.get("limit")) || 20),
         offset = Number(url.searchParams.get("offset")) || 0;
-      const select = table === "tags" ? "t.*" : "t.*, json_build_object('name',tags.name) as tags";
-      const join = table === "scan_events" ? " join tags on tags.id=t.tag_id" : "";
+      const select = table === "nfc" ? "t.*" : "t.*, json_build_object('name',nfc.name) as tags";
+      const join = table === "nfc_scan_events" ? " join nfc on nfc.id=t.tag_id" : "";
       result = await db.query(
         `select ${select} from ${table} t${join}${condition} order by ${order} limit ${limit} offset ${offset}`,
         values,
