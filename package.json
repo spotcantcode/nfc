@@ -14,12 +14,13 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "NEXT_PUBLIC_APP_URL=https://nfc.example.com npm run build && playwright test",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "admin:add": "node --env-file=.env.local --import tsx scripts/add-admin.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "start:local": "APP_MODE=local-admin next start --hostname 127.0.0.1"
+    "start:local": "APP_MODE=local-admin next start --hostname 127.0.0.1",
+    "local": "node scripts/start-local.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "1.2.1",

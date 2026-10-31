@@ -37,46 +37,32 @@ The public sticker origin is **https://nfc-gamma-nine.vercel.app**. Keep this ho
 
 Keep `public` exposed in the Data API and **do not expose `nfc_private`**. Only the two public wrappers (`nfc_resolve` and `nfc_record_scan`) are enabled for anonymous callers. RLS and revoked table privileges prevent reading the `nfc` table, names/notes/history, and all tag mutations. Statistics, session lookup, rate limiting, and retention remain service-only. A person who knows a tag URL can resolve it and record scans; these capabilities are deliberately public. Existing project policies for other apps are unchanged.
 
-## Run the dashboard on your Mac
+## Start the dashboard on your Mac
 
-Use Node.js 22 or newer:
+**Double-click `Start NFC.command` in the repository folder.** It opens Terminal, starts NFC on this computer only, and opens your browser when ready. Keep that Terminal window open; press **Control+C** to stop the app. Double-clicking again reopens an already-running NFC app.
 
-```sh
-npm ci
-cp .env.example .env.local
-```
+The launcher requires Node.js 22+ (install from [nodejs.org](https://nodejs.org) if needed). It installs dependencies on the first run if they are missing, creates `.env.local` from `.env.example` if needed, and generates a private session secret. If a key is missing, it opens `.env.local` in TextEdit for one-time setup. Save the file and double-click the launcher again.
 
-Fill in `.env.local`:
+The local dashboard uses **http://localhost:3187**. Your stickers always use **https://nfc-gamma-nine.vercel.app**. These are separate addresses.
 
-| Variable                   | Local value                                                                        |
-| -------------------------- | ---------------------------------------------------------------------------------- |
-| `APP_MODE`                 | `local-admin` (also explicitly selected by the local start commands)               |
-| `ADMIN_APP_URL`            | `http://localhost:3000` — loopback origins only                                    |
-| `NEXT_PUBLIC_APP_URL`      | `https://nfc-gamma-nine.vercel.app` — the **public sticker origin**, not localhost |
-| `SUPABASE_URL`             | `https://buoueqgtrfbimncyrsss.supabase.co`                                         |
-| `SUPABASE_PUBLISHABLE_KEY` | Same publishable key or legacy anon key                                            |
-| `SUPABASE_SECRET_KEY`      | Local-only secret key or legacy service_role key                                   |
-| `ADMIN_EMAILS`             | Comma-separated exact approved email addresses                                     |
-| `SESSION_SECRET`           | At least 32 random characters; generate with `openssl rand -hex 32`                |
+Only these settings belong in the local env template:
 
-Then:
+| Variable                   | Value                                                           |
+| -------------------------- | --------------------------------------------------------------- |
+| `ADMIN_APP_URL`            | `http://localhost:3187` — local dashboard address               |
+| `NEXT_PUBLIC_APP_URL`      | `https://nfc-gamma-nine.vercel.app` — permanent sticker address |
+| `SUPABASE_URL`             | `https://buoueqgtrfbimncyrsss.supabase.co`                      |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key or legacy anon key                     |
+| `SUPABASE_SECRET_KEY`      | Secret key or legacy service_role key; keep only on this Mac    |
+| `ADMIN_EMAILS`             | `cspotrn@gmail.com`, or your exact approved email addresses     |
 
-```sh
-npm run dev
-```
+The launcher supplies `APP_MODE=local-admin` and generates `SESSION_SECRET` automatically; you do not need to configure those in the template. Existing `.env.local` settings and an existing session secret are preserved. The file is restricted to your macOS user.
 
-Open **http://localhost:3000** on this computer. If you change ports, update `ADMIN_APP_URL` and the Supabase callback allowlist to match. The public sticker URL never changes.
+Terminal alternative: `npm run local`. For direct development, `npm run dev -- --port 3187` also works after the launcher has prepared `.env.local`. For an optimized local build, run `npm run build` then `npm run start:local -- --port 3187`.
 
-To use an optimized local build instead:
+If you change the local port in `.env.local`, update the Supabase callback allowlist to match. The launcher refuses to open a different app that is already using the chosen port. `npm start` selects the public redirect-only mode; use the launcher or `npm run local` for management.
 
-```sh
-npm run build
-npm run start:local
-```
-
-`npm start` runs the default redirect-only mode, bound to loopback. For the local dashboard use `start:local`. Local HTTP cookies are HTTP-only and SameSite=Lax; they use Secure when the configured loopback origin uses HTTPS.
-
-Keep `.env.local` out of Git and cloud hosting. No Supabase project or credentials are invented by this repository. Without the required configuration the local login page shows setup guidance.
+Keep `.env.local` out of Git and Vercel. The separate `.env.public.example` lists the public deployment’s settings.
 
 ## Local email sign-in
 
@@ -91,7 +77,7 @@ Email sign-in remains an extra safeguard for the local dashboard. No public sign
 
    This reads `.env.local`, creates a confirmed owner, and sends no email. Alternatively use Supabase's admin UI to create a confirmed user. Login uses `shouldCreateUser: false`.
 
-3. Add the exact callback **`http://localhost:3000/auth/callback`** to Supabase Auth’s redirect allowlist, preserving other apps’ URLs and the existing Site URL. NFC passes this local callback explicitly. Use your chosen local port consistently.
+3. Add the exact callback **`http://localhost:3187/auth/callback`** to Supabase Auth’s redirect allowlist, preserving other apps’ URLs and the existing Site URL. NFC passes this local callback explicitly. Use your chosen local port consistently.
 4. Keep the Magic Link email template linked to `{{ .ConfirmationURL }}`:
 
    ```html

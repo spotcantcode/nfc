@@ -50,6 +50,7 @@ export async function proxy(request: NextRequest) {
     await client.auth.getUser();
   }
   Object.entries(noStore).forEach(([key, value]) => response.headers.set(key, value));
+  response.headers.set("X-NFC-Local-App", "tapspace");
   return response;
 }
 export const config = {
