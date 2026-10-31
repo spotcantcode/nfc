@@ -33,6 +33,8 @@ vi.mock("next/server", async (original) => ({
   ...(await original<typeof import("next/server")>()),
   after: mocks.after,
 }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: "localhost:3000" }) }));
+vi.mock("@/lib/supabase/public", () => ({ redirectDb: () => ({ rpc: mocks.rpc }) }));
 import { HttpError } from "@/lib/http";
 import { POST as create, GET as list } from "@/app/api/tags/route";
 import { PATCH as update, DELETE as remove } from "@/app/api/tags/[id]/route";
@@ -51,7 +53,7 @@ function request(
   path = "/api/tags",
   method = "POST",
   data: unknown = input,
-  origin = "https://nfc.example.com",
+  origin = "http://localhost:3000",
 ) {
   return new Request(`https://nfc.example.com${path}`, {
     method,
@@ -127,7 +129,7 @@ describe("login allowlist and enumeration protection", () => {
       email: "owner@example.com",
       options: {
         shouldCreateUser: false,
-        emailRedirectTo: "https://nfc.example.com/auth/callback",
+        emailRedirectTo: "http://localhost:3000/auth/callback",
       },
     });
     mocks.otp.mockClear();

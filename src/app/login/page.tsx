@@ -2,13 +2,15 @@ import { ArrowUpRight, Link2, ShieldCheck, Radio, RefreshCw } from "lucide-react
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { LoginForm } from "@/components/login-form";
-import { configured } from "@/lib/config";
+import { configured, managementEnabled } from "@/lib/config";
+import { notFound } from "next/navigation";
 export const dynamic = "force-dynamic";
 export default async function Login({
   searchParams,
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
+  if (!managementEnabled()) notFound();
   const ready = configured();
   const { error } = await searchParams;
   return (
@@ -61,12 +63,12 @@ export default async function Login({
           <ThemeToggle />
         </header>
         <div className="mx-auto my-auto w-full max-w-[370px] py-16">
-          <p className="eyebrow mb-4">YOUR PRIVATE WORKSPACE</p>
+          <p className="eyebrow mb-4">YOUR LOCAL WORKSPACE</p>
           <h2 className="text-3xl font-semibold tracking-tight">Welcome to Tapspace.</h2>
           <p className="mt-3 mb-8 text-sm leading-6 text-muted-foreground">
             A little space for all your connections.
             <br />
-            Sign in to manage your NFC tags.
+            Sign in to manage your NFC tags on this computer.
           </p>
           {!ready && (
             <div

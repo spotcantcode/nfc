@@ -1,59 +1,39 @@
 # Tapspace · NFC Tag Manager
 
-A private, single-owner Next.js dashboard for permanent NFC links with editable destinations. Uses TypeScript, Tailwind, shadcn/ui, Supabase Auth/PostgreSQL, and Vercel. No custom domain required.
+Manage NFC tags **only on your computer**. Vercel serves the public sticker URLs and records scans, using a Supabase publishable key with two narrow database capabilities. Your Mac holds the management credential. Tags keep working while your Mac is off.
 
-## Run locally
+## Two modes
 
-Use Node.js 22 or newer.
+| Runtime                                 | Behavior                                                                                                 | Credentials                                                             |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Public Vercel deployment                | `/nfc/[id]` redirects and scan recording; dashboard, login, callback, and management APIs return **404** | Supabase URL + publishable/anon key only                                |
+| Local computer (`APP_MODE=local-admin`) | Authenticated dashboard, tag editing, QR codes, scan history                                             | Local-only Supabase secret key, owner allowlist, session signing secret |
 
-```sh
-npm ci
-cp .env.example .env.local
-npm run dev
-```
+Unset or unrecognized `APP_MODE` means redirects only. Management is **always disabled on Vercel**, even if `APP_MODE=local-admin` is accidentally copied there. The local start commands bind to `127.0.0.1`; Host and Origin checks provide additional protection. Never expose or tunnel the local dashboard to the internet.
 
-Open http://localhost:3000. Without configuration, the sign-in page shows setup guidance; it does not enable a demo account. Fill in `.env.local` using your own project:
+The app uses Next.js App Router, TypeScript, Tailwind, shadcn/ui, and Supabase PostgreSQL/Auth.
 
-| Variable                   | Value                                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `NEXT_PUBLIC_APP_URL`      | Fixed origin, e.g. `http://localhost:3000` locally; `https://your-project.vercel.app` in production. No path. |
-| `SUPABASE_URL`             | Project API URL from Supabase → Connect                                                                       |
-| `SUPABASE_PUBLISHABLE_KEY` | Publishable key (legacy anon key also works)                                                                  |
-| `SUPABASE_SECRET_KEY`      | Server secret key (legacy service_role also works). Never prefix with `NEXT_PUBLIC_`.                         |
-| `ADMIN_EMAILS`             | Comma-separated exact approved email addresses; case insensitive                                              |
-| `SESSION_SECRET`           | Random secret of at least 32 characters; generate with `openssl rand -hex 32`                                 |
-| `CRON_SECRET`              | Separate random secret for the daily retention job; generate with `openssl rand -hex 32`                      |
+## Existing deployment: switch safely
 
-Keep `.env.local` and all keys out of Git. Only the app origin is public. Restart development/redeploy production after changing environment variables.
+The public sticker origin is **https://nfc-gamma-nine.vercel.app**. Keep this hostname and the same database so existing stickers remain valid.
 
-## Configure Supabase
+1. Apply the new `supabase/migrations/20261031164151_split_public_redirect_capabilities.sql` migration **before deploying this change**. For a fresh database, apply both migration files in filename order. They preserve existing tags, identifiers, destinations, and scans.
+2. Configure Vercel using only the values in `.env.public.example`:
 
-Use a dedicated project. No external project, credentials, or SMTP service is automatically created by this repository.
-
-1. Apply `supabase/migrations/20261031160704_initial_nfc_schema.sql` through the Supabase SQL editor, or use the CLI migration workflow below. Keep `public` in the Data API's exposed schemas. The migration explicitly grants access to `service_role`; both browser roles are denied.
-2. In Authentication → Sign In / Providers, enable email auth and **disable new user signups**. Disable anonymous sign-ins and unused providers. `supabase/config.toml` applies these settings to local Supabase only; hosted settings must be changed in the dashboard.
-3. Provision each approved owner once (this does not send an email):
-
-   ```sh
-   npm run admin:add -- you@example.com
+   ```dotenv
+   APP_MODE=redirects
+   NEXT_PUBLIC_APP_URL=https://nfc-gamma-nine.vercel.app
+   SUPABASE_URL=<your Supabase project URL>
+   SUPABASE_PUBLISHABLE_KEY=<your publishable key or legacy anon key>
    ```
 
-   The script reads `.env.local` and requires the email to already appear in `ADMIN_EMAILS`. Alternatively, create a confirmed user using Supabase's admin dashboard. There is no signup screen; login always uses `shouldCreateUser: false`.
+   Remove `SUPABASE_SECRET_KEY`, `SESSION_SECRET`, `ADMIN_EMAILS`, `ADMIN_APP_URL`, and the obsolete `CRON_SECRET` from Vercel. Do not copy `.env.local` to Vercel. A secret/service-role key in the publishable-key setting is rejected.
 
-4. Set Authentication → URL Configuration → Site URL to the app's fixed origin. Allow the exact `https://your-project.vercel.app/auth/callback`; for development also allow `http://localhost:3000/auth/callback`. Avoid wildcard production redirect URLs. Preview deployments need their own explicit origin and callback or a separate project.
-5. Keep the Magic Link email template linked to **`{{ .ConfirmationURL }}`**, for example:
+3. Redeploy. Signed-out and signed-in requests to `/`, `/login`, `/auth/callback`, `/dashboard/*`, and `/api/*` should return 404. Known active `/nfc/[id]` links should still return 307 with `no-store` headers.
+4. Remove older deployments that still serve the hosted dashboard. If a management key was stored in an older deployment, rotate that key and update the local copy; removing an environment variable from new deployments does not remove it from old ones.
+5. Set up database-side retention below. The former Vercel cron route and schedule have been removed.
 
-   ```html
-   <a href="{{ .ConfirmationURL }}">Sign in to Tapspace</a>
-   ```
-
-   The server starts Supabase's supported PKCE flow; the confirmation URL verifies the email and returns a one-use `code` to `/auth/callback`, where it is exchanged using the HTTP-only verifier cookie. Open the link in the **same browser** that requested it. A different browser, an expired/used link, or an aggressive email scanner may require a fresh link. Do not replace the template with a token-hash/implicit-flow URL; this app intentionally uses the code exchange.
-
-6. Configure custom SMTP in Supabase for real delivery (host, port, username/password, verified sender). Supabase's built-in sender has restricted recipients and low limits. Disable click tracking/link rewriting in your SMTP provider. SMTP credentials belong in Supabase, not in this app. Check delivery logs when no email arrives; the app deliberately gives the same login response for allowed, unknown, and unprovisioned emails.
-7. Set the Supabase JWT lifetime to 15 minutes. If your Supabase plan supports session timeboxing/inactivity limits, configure these too. The app independently enforces an absolute **12-hour** sign-in lifetime, regardless of refresh, and checks the live `auth.sessions` record on every management request. Logout revokes the current Supabase session immediately.
-8. Run Supabase Security Advisor after applying the migration. No browser role should have access to any app table or RPC. `is_live_session` is the sole security-definer helper: service-only, empty search path, and boolean-only access to the Auth session table. All other functions use invoker permissions.
-
-CLI alternative (Supabase CLI installed and authenticated):
+CLI migration alternative (Supabase CLI installed and authenticated):
 
 ```sh
 supabase link --project-ref YOUR_PROJECT_REF
@@ -62,43 +42,103 @@ supabase db push
 supabase db advisors --linked
 ```
 
-For a Docker-backed local Supabase, use `supabase start` and its local project values. The checked-in config disables signup; provision the owner with the script above. The application itself does not require Docker.
+Use a dedicated Supabase project. Keep `public` in the Data API's exposed schemas, and **do not expose `nfc_private`**. The migration enables only the two public lookup/scan wrappers for the anonymous role. RLS and revoked table privileges still prevent reading the tag table, private names/notes/history, and all tag mutations. Statistics, session lookup, rate limiting, and retention RPCs remain service-only. Anonymous callers who know a tag URL can resolve it and record scans; these operations are intentionally public.
 
-## Deploy to Vercel
+## Run the dashboard on your Mac
 
-1. Import this GitHub repository as a Next.js project. Use Node 22+, default build (`npm run build`), and no custom output directory.
-2. Set all environment variables above in Vercel's Production environment. Set `NEXT_PUBLIC_APP_URL` to the chosen free production `.vercel.app` origin. Add that exact callback to Supabase and update its Site URL.
-3. Deploy or redeploy. Requests under `/nfc/*` are public; `/dashboard/*` and all tag APIs require an approved live session. Vercel deployment protection must allow public access to the production NFC routes.
-4. `vercel.json` schedules one daily retention job, compatible with Vercel Hobby's daily schedule. Vercel sends `Authorization: Bearer <CRON_SECRET>` automatically. It removes event details older than 90 days and old rate-limit buckets; lifetime scan counters and reserved IDs remain. If deploying elsewhere, schedule the same authenticated GET `/api/cron/retention` daily. Never put the secret in the URL.
-5. Smoke-test the real email flow, then create a tag, open its public URL while signed out, edit the destination, and open the same URL again. Test with the physical sticker before placing it.
+Use Node.js 22 or newer:
 
-**Keep the production hostname stable.** The sticker contains the full URL. A redeployment preserves all tags in Supabase, but renaming the Vercel project/domain or replacing the database requires keeping the old URL and data working. This app never stores tags in Vercel's ephemeral filesystem.
+```sh
+npm ci
+cp .env.example .env.local
+```
 
-## Using a sticker
+Fill in `.env.local`:
 
-Create a tag, then copy its **NFC URL** from the dashboard. In a third-party iPhone NFC writer (e.g. NFC Tools), choose Write → Add a record → URL / URI, paste the NFC URL, and write to a compatible NDEF sticker. Later destination edits happen entirely in the dashboard; the sticker's URL and random ID stay unchanged. QR codes encode the same URL and are generated locally, without a third-party QR service.
+| Variable                   | Local value                                                                        |
+| -------------------------- | ---------------------------------------------------------------------------------- |
+| `APP_MODE`                 | `local-admin` (also explicitly selected by the local start commands)               |
+| `ADMIN_APP_URL`            | `http://localhost:3000` — loopback origins only                                    |
+| `NEXT_PUBLIC_APP_URL`      | `https://nfc-gamma-nine.vercel.app` — the **public sticker origin**, not localhost |
+| `SUPABASE_URL`             | Same Supabase project as the public server                                         |
+| `SUPABASE_PUBLISHABLE_KEY` | Same publishable key or legacy anon key                                            |
+| `SUPABASE_SECRET_KEY`      | Local-only secret key or legacy service_role key                                   |
+| `ADMIN_EMAILS`             | Comma-separated exact approved email addresses                                     |
+| `SESSION_SECRET`           | At least 32 random characters; generate with `openssl rand -hex 32`                |
 
-## Security and data behavior
+Then:
 
-- Every page that loads private data and every management endpoint independently verifies Supabase identity, the current server email allowlist, the signed absolute session expiry, and the live session. Removing an email takes effect on the next server request after your env change/redeployment.
-- Authentication runs only on the server: PKCE, HTTP-only, SameSite=Lax cookies; Secure cookies in production; refresh in Next.js Proxy. No browser Supabase SDK or privileged keys. State-changing requests require the exact configured Origin and bounded, validated JSON. Security headers block framing, object embedding, and referrer leakage. CSP permits Next.js inline scripts; it is defense in depth, not a replacement for escaping and input validation.
-- All app tables have RLS and explicit deny policies for `anon`/`authenticated`, plus revoked privileges. The server secret bypasses RLS only after application authorization. The public route calls a narrow lookup RPC returning only the destination of one active tag. Anonymous clients cannot enumerate tags or call RPCs directly.
-- IDs use 24 cryptographically random bytes (192 bits), generated on the server. Database triggers reserve every ID permanently and reject identity changes/reuse, including after deletion. Deletion removes the tag and its scan details; the reserved identifier remains. Lifetime totals shown on the dashboard cover currently existing tags.
-- Public GETs return **307** with browser/CDN `no-store` headers. Missing and disabled tags show the same generic page. Analytics runs after the response and cannot prevent redirects. HEAD requests do not count as scans. Network failures can lose an analytics event; counts include link previews/bots and are not unique human visitors.
-- Destinations must use HTTPS, no credentials, no custom ports, and no local/reserved addresses. DNS records are checked at save and redirect time, including mixed public/private records. The server never fetches the destination. DNS failure returns a temporary unavailable page. DNS rebinding and destination-controlled redirect chains cannot be fully prevented by a link manager: only use domains you trust. Random URLs are **not authentication** and the destination is visible to every visitor; protect sensitive resources at their source.
-- Scan events contain only a timestamp and tag ID. No IP addresses, user agents, geolocation, or fingerprints are recorded by the app. Login rate keys use an HMAC of the submitted email; no IP is stored. Vercel/Supabase may retain their own infrastructure logs under your account settings.
-- PostgreSQL provides shared, atomic rate limiting across deployments/instances: 3 login attempts per email per 15-minute window plus a global 60/minute cap, 60 mutations/minute per owner, and 120 API reads/minute. It fails closed when storage is unavailable. Retention secrets and service keys are never returned to clients.
+```sh
+npm run dev
+```
+
+Open **http://localhost:3000** on this computer. If you change ports, update `ADMIN_APP_URL` and the Supabase callback allowlist to match. The public sticker URL never changes.
+
+To use an optimized local build instead:
+
+```sh
+npm run build
+npm run start:local
+```
+
+`npm start` runs the default redirect-only mode, bound to loopback. For the local dashboard use `start:local`. Local HTTP cookies are HTTP-only and SameSite=Lax; they use Secure when the configured loopback origin uses HTTPS.
+
+Keep `.env.local` out of Git and cloud hosting. No Supabase project or credentials are invented by this repository. Without the required configuration the local login page shows setup guidance.
+
+## Local email sign-in
+
+Email sign-in remains an extra safeguard for the local dashboard. No public signup is provided.
+
+1. In Supabase Authentication, enable email auth, **disable new-user signup**, and disable anonymous sign-ins and unused providers. Checked-in `supabase/config.toml` settings apply only to Docker-backed local Supabase; change hosted settings in the dashboard.
+2. Add your email to local `ADMIN_EMAILS`, then provision it once:
+
+   ```sh
+   npm run admin:add -- you@example.com
+   ```
+
+   This reads `.env.local`, creates a confirmed owner, and sends no email. Alternatively use Supabase's admin UI to create a confirmed user. Login uses `shouldCreateUser: false`.
+
+3. Set Supabase Auth Site URL to `http://localhost:3000`. Allow the exact callback **`http://localhost:3000/auth/callback`**. Remove the old Vercel callback from the allowlist. Use your chosen local port consistently.
+4. Keep the Magic Link email template linked to `{{ .ConfirmationURL }}`:
+
+   ```html
+   <a href="{{ .ConfirmationURL }}">Sign in to Tapspace</a>
+   ```
+
+   The server uses PKCE and exchanges the one-use code at the local callback. Open the link in the **same browser on your Mac** that requested it. Opening it on your phone will not work. Expired/used links, a different browser, or email link scanners may require a fresh link.
+
+5. Configure custom SMTP in Supabase for real delivery: host, port, username/password, verified sender. Disable email click tracking/link rewriting. Supabase's default sender has recipient restrictions and low limits. SMTP secrets belong in Supabase. Login responses deliberately do not reveal whether an email is allowed/provisioned; use Supabase delivery logs to troubleshoot.
+6. Set JWT lifetime to 15 minutes. The app additionally enforces an absolute 12-hour session, checks the live Auth session on every management request, and revokes the current session on logout.
+
+## Retention while your Mac is off
+
+Enable **Supabase Cron** in the Supabase dashboard, then run `supabase/retention.sql` in its SQL editor as the project owner. It schedules `public.prune_history()` daily at 03:00 UTC. The named schedule is updated if run again. Check the job's run history in Supabase.
+
+The function removes event details older than 90 days and expired rate-limit buckets. Lifetime scan counters and reserved identifiers remain. This runs in the database with no public HTTP cleanup endpoint or management key on Vercel. If Cron is not enabled, cleanup is not automatic; run `select public.prune_history();` manually until scheduled.
+
+## Write and use a sticker
+
+Create a tag locally and copy its **public NFC URL**. In an iPhone NFC writer such as NFC Tools, choose Write → Add a record → URL / URI, paste that URL, and write a compatible NDEF sticker. QR codes encode the same URL and are generated locally. Later edits happen in the local dashboard; the sticker never needs rewriting.
+
+Public links return 307 temporary redirects with browser/CDN `no-store` headers. Missing/disabled tags share a generic unavailable page. DNS/storage outages can temporarily prevent resolution; failed scan analytics never prevent an otherwise valid redirect. HEAD requests do not count as scans. Counts include bots and link previews, and are not unique people.
+
+Destinations allow public HTTPS URLs only: no embedded credentials, custom ports, or local/reserved IPs. DNS is checked at save and redirect time. The server never fetches the destination. Destination-controlled redirects and DNS rebinding cannot be fully prevented: use domains you trust. Random NFC URLs are **not authentication**, and every visitor can see the destination; protect sensitive resources at their source.
+
+Scan events store only tag ID and timestamp. No IP addresses, location, user agents, or fingerprints are collected by the app. Provider infrastructure logs follow your Supabase/Vercel settings. Local management uses server authorization, bounded validated JSON, exact-origin CSRF checks, HTTP-only cookies, and PostgreSQL-backed rate limits. IDs use 192 random bits and remain permanently reserved after deletion.
 
 ## Verify
 
 ```sh
-npm run check             # lint, TypeScript, unit/API/PostgreSQL tests, production build
+npm run check              # lint, TypeScript, unit/API/PostgreSQL tests, production build
 npx playwright install chromium
-npm run test:e2e          # desktop + iPhone-sized Chromium browser journeys
+npm run test:e2e           # builds, then tests separate local-admin and production public servers
+npm run format:check
 ```
 
-Tests cover ID uniqueness/entropy, email allowlisting, session expiry/revocation, unauthenticated access and mutations, CSRF, URL and DNS validation, creation/editing, immutable IDs, retirement, redirects, no-store headers, analytics failure, retention, and persistence after a PostgreSQL restart. The database tests execute the actual migration in PGlite (PostgreSQL in WebAssembly), without credentials. Browser tests run the real app with a **test-only** local Auth/PostgREST stand-in backed by that migration; they verify the full create → redirect → edit → scan history → disable → delete → logout flow. They do not verify Supabase's own hosted PKCE implementation, real SMTP delivery, a live Vercel redeployment, or physical NFC hardware. Complete the production smoke test above after configuration.
+PGlite tests execute **all real migrations**, verify anonymous capability restrictions and RLS, and check ID reservation, scans, retention, and persistence across database restart. Browser tests use the real app, local-only mock Auth/PostgREST backed by PostgreSQL, and a separate **production** server with no management secrets and `VERCEL=1` (even with a deliberately wrong local-admin setting). They check public 404s, local login, creation, public redirects, destination edits without URL changes, scans, disable/delete, logout, and themes. The existing responsive layout is also regression-tested at an iPhone-sized viewport; it does not enable remote phone management.
 
-GitHub Actions runs all checks and both browser journeys. Test screenshots are written to ignored `output/playwright/`.
+Tests do not verify real SMTP, hosted Supabase PKCE internals, physical NFC hardware, or your live Vercel environment. After applying migrations/configuration, smoke-test a real email link on the Mac and the same physical sticker before and after a destination edit.
 
-Sources: [Supabase SSR](https://supabase.com/docs/guides/auth/server-side/creating-a-client), [PKCE details](https://supabase.com/docs/guides/auth/server-side/advanced-guide), [passwordless auth](https://supabase.com/docs/guides/auth/auth-email-passwordless), [Next.js setup](https://nextjs.org/docs/app/getting-started/installation).
+GitHub Actions runs the checks and browser tests. Dependencies are pinned, with the compatible patched `minimatch` override for the lint tooling. Screenshots go to ignored `output/playwright/`.
+
+Sources: [Supabase SSR](https://supabase.com/docs/guides/auth/server-side/creating-a-client), [database function privileges](https://supabase.com/docs/guides/database/functions), [Supabase Cron](https://supabase.com/docs/guides/cron/quickstart), [Next.js CLI](https://nextjs.org/docs/app/api-reference/cli/next).

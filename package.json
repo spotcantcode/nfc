@@ -7,18 +7,19 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "APP_MODE=local-admin next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start",
+    "start": "APP_MODE=redirects next start --hostname 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "npm run build && playwright test",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "admin:add": "node --env-file=.env.local --import tsx scripts/add-admin.ts",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "start:local": "APP_MODE=local-admin next start --hostname 127.0.0.1"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "1.2.1",

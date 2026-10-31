@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+const publicUrl = (url: string) => `http://localhost:3110${new URL(url).pathname}`;
 test("private dashboard, public redirects, and the complete tag lifecycle", async ({
   page,
   request,
@@ -7,6 +8,24 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login$/);
+  for (const path of [
+    "/",
+    "/dashboard",
+    "/dashboard/activity",
+    "/login",
+    "/auth/callback?code=test",
+    "/api/tags",
+    "/api/tags/" + "Z".repeat(32) + "/scans",
+    "/api/cron/retention",
+  ]) {
+    expect((await request.get(`http://localhost:3110${path}`, { maxRedirects: 0 })).status()).toBe(
+      404,
+    );
+  }
+  for (const method of ["POST", "PATCH", "DELETE"])
+    expect(
+      (await request.fetch("http://localhost:3110/api/tags", { method, data: {} })).status(),
+    ).toBe(404);
   expect((await request.post("/api/tags", { data: {} })).status()).toBe(401);
   const missing = await request.get("/nfc/" + "Z".repeat(32));
   expect(missing.status()).toBe(404);
@@ -17,6 +36,16 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
   // Fixture emulates Supabase's successful code exchange. The app still issues and checks real signed cookies.
   await page.goto("/auth/callback?code=fixture-auth-code");
   await expect(page).toHaveURL(/\/dashboard$/);
+  expect(
+    (await page.request.get("http://localhost:3110/dashboard", { maxRedirects: 0 })).status(),
+  ).toBe(404);
+  expect(
+    (
+      await page.request.post("http://localhost:3110/api/auth/login", {
+        data: { email: "owner@example.com" },
+      })
+    ).status(),
+  ).toBe(404);
   const authCookies = await page.context().cookies();
   expect(
     authCookies
@@ -32,6 +61,7 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
   await page.getByRole("dialog").getByRole("button", { name: "Create tag", exact: true }).click();
   await expect(page.getByRole("dialog").getByRole("heading", { name })).toBeVisible();
   const url = await page.getByRole("textbox", { name: "Public NFC URL" }).inputValue();
+  expect(url).toContain("https://nfc.example.com/nfc/");
   expect(url).toMatch(/\/nfc\/[A-Za-z0-9_-]{32}$/);
   await expect(
     page
@@ -39,7 +69,7 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
       .locator("svg")
       .filter({ has: page.locator("title") }),
   ).toHaveCount(1);
-  const first = await request.get(url, { maxRedirects: 0 });
+  const first = await request.get(publicUrl(url), { maxRedirects: 0 });
   expect(first.status()).toBe(307);
   expect(first.headers().location).toBe("https://example.com/first");
   expect(first.headers()["cache-control"]).toContain("no-store");
@@ -49,7 +79,7 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
   await page.getByLabel("Destination URL", { exact: true }).fill("https://example.com/second");
   await page.getByRole("button", { name: "Save changes" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  const second = await request.get(url, { maxRedirects: 0 });
+  const second = await request.get(publicUrl(url), { maxRedirects: 0 });
   expect(second.status()).toBe(307);
   expect(second.headers().location).toBe("https://example.com/second");
   await page.reload();
@@ -88,12 +118,12 @@ test("private dashboard, public redirects, and the complete tag lifecycle", asyn
   await expect(page.getByRole("alertdialog")).toBeVisible();
   await page.getByRole("button", { name: "Disable and save" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  expect((await request.get(url, { maxRedirects: 0 })).status()).toBe(404);
+  expect((await request.get(publicUrl(url), { maxRedirects: 0 })).status()).toBe(404);
   await page.getByRole("button", { name: `Delete ${name}`, exact: true }).click();
   await expect(page.getByRole("alertdialog")).toContainText("Its URL stays reserved forever");
   await page.getByRole("button", { name: "Delete permanently" }).click();
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
-  expect((await request.get(url, { maxRedirects: 0 })).status()).toBe(404);
+  expect((await request.get(publicUrl(url), { maxRedirects: 0 })).status()).toBe(404);
   if (testInfo.project.name === "iphone")
     await page.getByRole("button", { name: "Toggle navigation" }).click();
   await page.getByRole("button", { name: "Sign out", exact: true }).click();

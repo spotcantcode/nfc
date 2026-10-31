@@ -4,7 +4,7 @@ import { createServerClient } from "@supabase/ssr";
 import { config } from "@/lib/config";
 export const cookieOptions = () => ({
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
+  secure: new URL(config().adminUrl).protocol === "https:",
   sameSite: "lax" as const,
   path: "/",
   maxAge: 60 * 60 * 12,

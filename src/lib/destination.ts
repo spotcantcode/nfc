@@ -2,11 +2,11 @@ import "server-only";
 import { Resolver } from "node:dns/promises";
 import ipaddr from "ipaddr.js";
 import { destinationUrl } from "@/lib/validation";
-import { config } from "@/lib/config";
+import { publicConfig } from "@/lib/config";
 export async function publicDestination(value: string) {
   const normalized = destinationUrl(value);
   const url = new URL(normalized);
-  if (url.origin === config().appUrl && url.pathname.startsWith("/nfc/"))
+  if (url.origin === publicConfig().appUrl && url.pathname.startsWith("/nfc/"))
     throw new Error("Choose a destination outside this app's NFC redirects.");
   const host = url.hostname.replace(/^\[|\]$/g, "");
   if (ipaddr.isValid(host)) return normalized;

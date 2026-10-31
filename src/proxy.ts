@@ -2,13 +2,35 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookieOptions } from "@/lib/supabase/server";
 import { noStore } from "@/lib/http";
+import { configured, managementEnabled, publicConfig } from "@/lib/config";
+
 export async function proxy(request: NextRequest) {
+  // Gate before auth, configuration, refresh, or database access. Public routes bypass this proxy.
+  if (!managementEnabled())
+    return new NextResponse("Not found.", { status: 404, headers: noStore });
+  const localUrl = process.env.ADMIN_APP_URL;
+  if (!localUrl)
+    return new NextResponse("Set ADMIN_APP_URL to your local dashboard origin.", {
+      status: 503,
+      headers: noStore,
+    });
+  try {
+    const url = new URL(localUrl);
+    if (
+      !["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) ||
+      request.headers.get("host") !== url.host
+    )
+      return new NextResponse("Not found.", { status: 404, headers: noStore });
+  } catch {
+    return new NextResponse("Invalid local dashboard configuration.", {
+      status: 503,
+      headers: noStore,
+    });
+  }
   let response = NextResponse.next({ request });
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_PUBLISHABLE_KEY) return response;
-  const client = createServerClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_PUBLISHABLE_KEY,
-    {
+  if (configured() && request.nextUrl.pathname !== "/auth/callback") {
+    const env = publicConfig();
+    const client = createServerClient(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, {
       cookieOptions: cookieOptions(),
       cookies: {
         getAll: () => request.cookies.getAll(),
@@ -24,10 +46,12 @@ export async function proxy(request: NextRequest) {
           );
         },
       },
-    },
-  );
-  await client.auth.getUser();
+    });
+    await client.auth.getUser();
+  }
   Object.entries(noStore).forEach(([key, value]) => response.headers.set(key, value));
   return response;
 }
-export const config = { matcher: ["/dashboard/:path*", "/api/tags/:path*", "/api/auth/logout"] };
+export const config = {
+  matcher: ["/", "/dashboard/:path*", "/login/:path*", "/auth/:path*", "/api/:path*"],
+};

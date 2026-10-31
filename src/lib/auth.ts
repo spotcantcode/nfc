@@ -1,14 +1,17 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { authClient } from "@/lib/supabase/server";
 import { adminDb } from "@/lib/supabase/admin";
-import { configured } from "@/lib/config";
+import { configured, managementEnabled } from "@/lib/config";
+import { assertManagementEnabled, assertLocalRequest } from "@/lib/management";
 import { isAdmin } from "@/lib/validation";
 import { HttpError } from "@/lib/http";
 import { sessionCookie, validSession } from "@/lib/session";
 export async function requireAdmin() {
+  assertManagementEnabled();
   if (!configured()) throw new HttpError(503, "The owner needs to finish configuring this app.");
+  await assertLocalRequest();
   const client = await authClient();
   const {
     data: { user },
@@ -36,6 +39,7 @@ export async function requireAdmin() {
   return user;
 }
 export async function requirePageAdmin() {
+  if (!managementEnabled()) notFound();
   try {
     return await requireAdmin();
   } catch (error) {

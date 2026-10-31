@@ -1,15 +1,20 @@
 import { PGlite } from "@electric-sql/pglite";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
-import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, readdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateId } from "@/lib/ids";
 let db: PGlite;
 let dir: string;
-const migration = await readFile(
-  new URL("../supabase/migrations/20261031160704_initial_nfc_schema.sql", import.meta.url),
-  "utf8",
-);
+const migrationDir = new URL("../supabase/migrations/", import.meta.url);
+const migration = (
+  await Promise.all(
+    (await readdir(migrationDir))
+      .filter((f) => f.endsWith(".sql"))
+      .sort()
+      .map((f) => readFile(new URL(f, migrationDir), "utf8")),
+  )
+).join("\n");
 const insert = (id: string, name = "Studio") =>
   db.query(
     "insert into public.tags(id,name,destination_url) values ($1,$2,'https://example.com') returning *",
@@ -28,6 +33,52 @@ afterAll(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 describe("actual PostgreSQL migration and persistence", () => {
+  it("anon can resolve and scan one active ID but cannot read private metadata or manage tags", async () => {
+    const id = generateId();
+    await insert(id, "Private name");
+    try {
+      await db.exec("set role anon");
+      expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([
+        { destination_url: "https://example.com" },
+      ]);
+      expect(
+        (await db.query("select * from public.resolve_nfc($1)", ["%' or true --"])).rows,
+      ).toEqual([]);
+      await db.query("select public.record_scan($1)", [id]);
+      await expect(db.query("select name, description from tags")).rejects.toThrow(
+        /permission denied/,
+      );
+      await expect(
+        db.query("update tags set destination_url='https://evil.com' where id=$1", [id]),
+      ).rejects.toThrow(/permission denied/);
+      await expect(insert(generateId())).rejects.toThrow(/permission denied/);
+      await expect(db.query("select public.tag_stats()")).rejects.toThrow(/permission denied/);
+      await expect(db.query("select public.prune_history()")).rejects.toThrow(/permission denied/);
+    } finally {
+      await db.exec("reset role");
+    }
+    const result = await db.query<{ scan_count: number; name: string; destination_url: string }>(
+      "select * from tags where id=$1",
+      [id],
+    );
+    expect(Number(result.rows[0].scan_count)).toBe(1);
+    expect(result.rows[0].name).toBe("Private name");
+    expect(result.rows[0].destination_url).toBe("https://example.com");
+    await db.query("update tags set active=false where id=$1", [id]);
+    try {
+      await db.exec("set role anon");
+      expect((await db.query("select * from public.resolve_nfc($1)", [id])).rows).toEqual([]);
+      await db.query("select public.record_scan($1)", [id]);
+    } finally {
+      await db.exec("reset role");
+    }
+    expect(
+      Number(
+        (await db.query<{ scan_count: number }>("select scan_count from tags where id=$1", [id]))
+          .rows[0].scan_count,
+      ),
+    ).toBe(1);
+  });
   it("creates and edits tags without changing their permanent ID", async () => {
     const id = generateId();
     await insert(id);
@@ -125,9 +176,11 @@ describe("actual PostgreSQL migration and persistence", () => {
         );
         await expect(db.query(`delete from public.${table}`)).rejects.toThrow(/permission denied/);
       }
-      await expect(db.query("select * from public.resolve_nfc('x')")).rejects.toThrow(
-        /permission denied/,
-      );
+      if (role === "authenticated")
+        await expect(db.query("select * from public.resolve_nfc('x')")).rejects.toThrow(
+          /permission denied/,
+        );
+      else expect((await db.query("select * from public.resolve_nfc('x')")).rows).toEqual([]);
       await expect(db.query("select public.consume_rate_limit('x',10,60)")).rejects.toThrow(
         /permission denied/,
       );

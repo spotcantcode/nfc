@@ -3,8 +3,10 @@ import { config } from "@/lib/config";
 import { body, checkOrigin, failure, HttpError, json } from "@/lib/http";
 import { isAdmin, loginInput } from "@/lib/validation";
 import { privateKey, rateLimit } from "@/lib/rate-limit";
+import { assertLocalRequest } from "@/lib/management";
 export async function POST(request: Request) {
   try {
+    await assertLocalRequest();
     checkOrigin(request);
     const parsed = loginInput.safeParse(await body(request));
     if (!parsed.success) throw new HttpError(400, "Enter a valid email address.");
@@ -16,7 +18,10 @@ export async function POST(request: Request) {
         const client = await authClient();
         await client.auth.signInWithOtp({
           email: parsed.data.email,
-          options: { shouldCreateUser: false, emailRedirectTo: `${config().appUrl}/auth/callback` },
+          options: {
+            shouldCreateUser: false,
+            emailRedirectTo: `${config().adminUrl}/auth/callback`,
+          },
         });
       } catch {
         /* Keep transport failures indistinguishable from unknown accounts. */

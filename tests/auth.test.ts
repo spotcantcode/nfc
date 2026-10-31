@@ -8,8 +8,16 @@ const mocks = vi.hoisted(() => ({
     throw new Error(`REDIRECT:${path}`);
   }),
 }));
-vi.mock("next/headers", () => ({ cookies: async () => ({ get: mocks.cookie }) }));
-vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({ get: mocks.cookie }),
+  headers: async () => new Headers({ host: "localhost:3000" }),
+}));
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect,
+  notFound: () => {
+    throw new Error("NOT_FOUND");
+  },
+}));
 vi.mock("@/lib/supabase/server", () => ({
   authClient: async () => ({ auth: { getUser: mocks.getUser, getSession: mocks.getSession } }),
 }));

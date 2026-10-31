@@ -116,7 +116,7 @@ describe("request boundaries", () => {
     expect(() => checkOrigin(new Request("https://nfc.example.com"))).toThrow(HttpError);
     expect(() =>
       checkOrigin(
-        new Request("https://nfc.example.com", { headers: { origin: "https://nfc.example.com" } }),
+        new Request("https://nfc.example.com", { headers: { origin: "http://localhost:3000" } }),
       ),
     ).not.toThrow();
   });

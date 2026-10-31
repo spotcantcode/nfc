@@ -2,6 +2,7 @@ node_modules/
 .next/
 .env*
 !.env.example
+!.env.public.example
 coverage/
 playwright-report/
 test-results/

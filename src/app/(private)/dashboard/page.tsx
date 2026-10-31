@@ -1,6 +1,6 @@
 import { requirePageAdmin } from "@/lib/auth";
 import { listTags, stats } from "@/lib/tags";
-import { config } from "@/lib/config";
+import { publicConfig } from "@/lib/config";
 import { Dashboard } from "@/components/dashboard";
 export default async function DashboardPage({
   searchParams,
@@ -28,7 +28,7 @@ export default async function DashboardPage({
       tags={result.tags}
       count={result.count}
       stats={totals}
-      baseUrl={config().appUrl}
+      baseUrl={publicConfig().appUrl}
       filters={filters}
       key={`${filters.q}:${filters.status}:${filters.sort}:${filters.page}`}
     />

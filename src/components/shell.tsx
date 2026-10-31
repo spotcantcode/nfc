@@ -139,7 +139,7 @@ export function Shell({ email, children }: { email: string; children: React.Reac
           </p>
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="size-1.5 rounded-full bg-emerald-600" /> Private workspace
+              <span className="size-1.5 rounded-full bg-emerald-600" /> Local workspace
             </span>
             <span className="h-4 border-l" />
             <ThemeToggle />

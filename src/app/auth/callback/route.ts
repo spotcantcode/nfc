@@ -4,10 +4,16 @@ import { config } from "@/lib/config";
 import { authClient, cookieOptions } from "@/lib/supabase/server";
 import { sessionCookie, sessionSeconds, signSession } from "@/lib/session";
 import { isAdmin } from "@/lib/validation";
-import { noStore } from "@/lib/http";
+import { failure, noStore } from "@/lib/http";
+import { assertLocalRequest } from "@/lib/management";
 import { rateLimit } from "@/lib/rate-limit";
 export async function GET(request: Request) {
-  const origin = config().appUrl;
+  try {
+    await assertLocalRequest();
+  } catch (error) {
+    return failure(error);
+  }
+  const origin = config().adminUrl;
   try {
     await rateLimit("auth:callback", 120, 60);
     const code = new URL(request.url).searchParams.get("code");

@@ -4,18 +4,15 @@
  */
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 const db = new PGlite();
 await db.exec(
   "create role anon; create role authenticated; create role service_role bypassrls; create schema auth; create table auth.sessions(id uuid primary key,user_id uuid,not_after timestamptz);",
 );
-await db.exec(
-  await readFile(
-    new URL("../../supabase/migrations/20261031160704_initial_nfc_schema.sql", import.meta.url),
-    "utf8",
-  ),
-);
+const migrationDir = new URL("../../supabase/migrations/", import.meta.url);
+for (const file of (await readdir(migrationDir)).filter((f) => f.endsWith(".sql")).sort())
+  await db.exec(await readFile(new URL(file, migrationDir), "utf8"));
 const userId = "00000000-0000-0000-0000-000000000001",
   sessionId = "00000000-0000-0000-0000-000000000002";
 const user = {
@@ -78,7 +75,6 @@ const server = createServer(async (req, res) => {
       await db.query("delete from auth.sessions where id=$1", [sessionId]);
       return send({});
     }
-    if (req.headers.apikey !== "fixture-secret") return send({ message: "Forbidden" }, 403);
     const rpc = url.pathname.match(/^\/rest\/v1\/rpc\/(\w+)$/)?.[1];
     const functions: Record<string, string[]> = {
       resolve_nfc: ["p_id"],
@@ -88,12 +84,21 @@ const server = createServer(async (req, res) => {
       is_live_session: ["p_session", "p_user"],
       prune_history: [],
     };
+    const isPublic = req.headers.apikey === "fixture-publishable";
+    if (
+      req.headers.apikey !== "fixture-secret" &&
+      !(isPublic && rpc && ["resolve_nfc", "record_scan"].includes(rpc))
+    )
+      return send({ message: "Forbidden" }, 403);
     if (rpc && functions[rpc]) {
       const args = functions[rpc];
-      const result = await db.query(
-        `select * from public.${rpc}(${args.map((_, i) => `$${i + 1}`).join(",")})`,
-        args.map((k) => payload[k]),
-      );
+      const result = await db.transaction(async (tx) => {
+        if (isPublic) await tx.exec("set local role anon");
+        return tx.query(
+          `select * from public.${rpc}(${args.map((_, i) => `$${i + 1}`).join(",")})`,
+          args.map((k) => payload[k]),
+        );
+      });
       return send(
         rpc === "resolve_nfc"
           ? result.rows
@@ -173,22 +178,48 @@ const server = createServer(async (req, res) => {
 await new Promise<void>((resolve) => server.listen(54329, "127.0.0.1", resolve));
 const child = spawn(
   process.execPath,
-  ["node_modules/next/dist/bin/next", "dev", "--port", "3109"],
+  ["node_modules/next/dist/bin/next", "dev", "--hostname", "127.0.0.1", "--port", "3109"],
   {
     stdio: "inherit",
     env: {
       ...process.env,
-      NEXT_PUBLIC_APP_URL: "http://localhost:3109",
+      APP_MODE: "local-admin",
+      ADMIN_APP_URL: "http://localhost:3109",
+      NEXT_PUBLIC_APP_URL: "https://nfc.example.com",
       SUPABASE_URL: "http://127.0.0.1:54329",
       SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
       SUPABASE_SECRET_KEY: "fixture-secret",
       ADMIN_EMAILS: user.email,
       SESSION_SECRET: "fixture-session-secret-at-least-32-characters",
-      CRON_SECRET: "fixture-cron",
+      VERCEL: "",
     },
   },
 );
+const publicChild = spawn(
+  process.execPath,
+  ["node_modules/next/dist/bin/next", "start", "--hostname", "127.0.0.1", "--port", "3110"],
+  {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      NODE_ENV: "production",
+      VERCEL: "1",
+      APP_MODE: "local-admin",
+      NEXT_PUBLIC_APP_URL: "https://nfc.example.com",
+      SUPABASE_URL: "http://127.0.0.1:54329",
+      SUPABASE_PUBLISHABLE_KEY: "fixture-publishable",
+      SUPABASE_SECRET_KEY: "",
+      SESSION_SECRET: "",
+      ADMIN_EMAILS: "",
+      ADMIN_APP_URL: "",
+    },
+  },
+);
+let stopping = false;
 const shutdown = () => {
+  if (stopping) return;
+  stopping = true;
+  publicChild.kill("SIGTERM");
   child.kill("SIGTERM");
   server.close();
   void db.close().then(() => process.exit());
@@ -196,3 +227,4 @@ const shutdown = () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 child.on("exit", () => shutdown());
+publicChild.on("exit", () => shutdown());

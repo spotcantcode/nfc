@@ -11,6 +11,8 @@ export default defineConfig({
     include: ["tests/**/*.test.ts"],
     environment: "node",
     env: {
+      APP_MODE: "local-admin",
+      ADMIN_APP_URL: "http://localhost:3000",
       NEXT_PUBLIC_APP_URL: "https://nfc.example.com",
       SUPABASE_URL: "https://test.supabase.co",
       SUPABASE_PUBLISHABLE_KEY: "test-publishable",

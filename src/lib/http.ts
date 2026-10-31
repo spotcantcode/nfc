@@ -24,7 +24,7 @@ export function failure(error: unknown) {
   return json({ error: "Something went wrong. Please try again shortly." }, 503);
 }
 export function checkOrigin(request: Request) {
-  if (request.headers.get("origin") !== config().appUrl)
+  if (request.headers.get("origin") !== config().adminUrl)
     throw new HttpError(403, "Please submit this request from the app.");
 }
 export async function body(request: Request) {
