@@ -7,9 +7,9 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "APP_MODE=local-admin next dev --hostname 127.0.0.1",
+    "dev": "APP_MODE=local-admin next dev --hostname 127.0.0.1 --port 3187",
     "build": "next build",
-    "start": "APP_MODE=redirects next start --hostname 127.0.0.1",
+    "start": "APP_MODE=redirects next start --hostname 127.0.0.1 --port 3187",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
@@ -19,7 +19,7 @@
     "admin:add": "node --env-file=.env.local --import tsx scripts/add-admin.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "start:local": "APP_MODE=local-admin next start --hostname 127.0.0.1",
+    "start:local": "APP_MODE=local-admin next start --hostname 127.0.0.1 --port 3187",
     "local": "node scripts/start-local.mjs"
   },
   "dependencies": {

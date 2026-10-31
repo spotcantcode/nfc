@@ -43,7 +43,7 @@ Keep `public` exposed in the Data API and **do not expose `nfc_private`**. Only 
 
 The launcher requires Node.js 22+ (install from [nodejs.org](https://nodejs.org) if needed). It installs dependencies on the first run if they are missing, creates `.env.local` from `.env.example` if needed, and generates a private session secret. If a key is missing, it opens `.env.local` in TextEdit for one-time setup. Save the file and double-click the launcher again.
 
-The local dashboard uses **http://localhost:3187**. Your stickers always use **https://nfc-gamma-nine.vercel.app**. These are separate addresses.
+NFC's assigned local port is **3187**, bound to loopback IP **127.0.0.1**. Open **http://localhost:3187**. The double-click launcher, `npm run local`, `npm run dev`, and `npm run start:local` all use this port by default and report an error if it is occupied. Your stickers always use **https://nfc-gamma-nine.vercel.app**.
 
 Only these settings belong in the local env template:
 
@@ -58,7 +58,7 @@ Only these settings belong in the local env template:
 
 The launcher supplies `APP_MODE=local-admin` and generates `SESSION_SECRET` automatically; you do not need to configure those in the template. Existing `.env.local` settings and an existing session secret are preserved. The file is restricted to your macOS user.
 
-Terminal alternative: `npm run local`. For direct development, `npm run dev -- --port 3187` also works after the launcher has prepared `.env.local`. For an optimized local build, run `npm run build` then `npm run start:local -- --port 3187`.
+Terminal alternative: `npm run local`. For direct development, `npm run dev` also works after the launcher has prepared `.env.local`. For an optimized local build, run `npm run build` then `npm run start:local`.
 
 If you change the local port in `.env.local`, update the Supabase callback allowlist to match. The launcher refuses to open a different app that is already using the chosen port. `npm start` selects the public redirect-only mode; use the launcher or `npm run local` for management.
 
